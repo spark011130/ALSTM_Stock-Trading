@@ -53,32 +53,19 @@ def calculate_stochastic_oscillator(data, k_window=14, d_window=3):
     d_percent = k_percent.rolling(window=d_window).mean()
     return k_percent, d_percent
 
-### ALSTM MODEL
+### LSTM MODEL
 
-class Attention(nn.Module):
-    def __init__(self, hidden_dim):
-        super(Attention, self).__init__()
-        self.attn_weights = nn.Linear(hidden_dim, 1, bias=False)
-    
-    def forward(self, lstm_output):
-        attn_scores = torch.tanh(self.attn_weights(lstm_output))  # (batch, seq_len, 1)
-        attn_weights = torch.softmax(attn_scores, dim=1)  # Normalize across time dimension
-        context = torch.sum(attn_weights * lstm_output, dim=1)  # Weighted sum
-        return context, attn_weights
-
-class ALSTM(nn.Module):
+class LSTMModel(nn.Module):
     def __init__(self, input_dim=12, hidden_dim=64, num_layers=2, output_dim=1, dropout=0.0):
-        super(ALSTM, self).__init__()
+        super(LSTMModel, self).__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.attention = Attention(hidden_dim)
         self.fc = nn.Linear(hidden_dim, output_dim)
     
     def forward(self, x):
         lstm_out, _ = self.lstm(x)  # (batch, seq_len, hidden_dim)
-        context, attn_weights = self.attention(lstm_out)  # Apply attention
-        output = self.fc(context)  # Final prediction
-        return output, attn_weights
-
+        output = self.fc(lstm_out[:, -1, :])  # Use last time step output
+        return output
+    
 ### DATA PROCESSING
 
 # Load stock data
@@ -122,23 +109,21 @@ def train_model(model, train_loader, epochs=100, lr=0.001):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
     for epoch in range(epochs):        
-        total_loss=0.0
+        total_loss = 0.0
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
 
-            y_pred, _ = model(X_batch)
-            y_pred = y_pred.squeeze()
-
+            y_pred = model(X_batch).squeeze()
             loss = criterion(y_pred, y_batch)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
         
-        if epoch % 5 == 0:
-            print(f"Epoch {epoch}/{epochs}, Loss: {total_loss / len(train_loader):.6f}")
+        if (epoch+1) % 5 == 0:
+            print(f"Epoch {(epoch+1)}/{epochs}, Loss: {total_loss / len(train_loader):.6f}")
     
-    torch.save(model.state_dict(), "alstm_model.pth")
+    torch.save(model.state_dict(), "outputs/lstm_model.pth")
     print("Model saved.")
 
 # Evaluate model and calculate performance metrics
@@ -150,34 +135,28 @@ def evaluate_model(model, test_loader, scaler):
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
             X_batch = X_batch.to(device)
-            y_pred, _ = model(X_batch)
-            y_pred = y_pred.squeeze().cpu().numpy()
+            y_pred = model(X_batch).squeeze().cpu().numpy()
             predictions.extend(y_pred)
             actuals.extend(y_batch.numpy())
 
-    # Convert to numpy arrays
     actuals = np.array(actuals).reshape(-1, 1)
     predictions = np.array(predictions).reshape(-1, 1)
 
-    # Inverse transform only 'Close' price
-    min_close = scaler.data_min_[3]  # 'Close' price min
-    max_close = scaler.data_max_[3]  # 'Close' price max
+    min_close = scaler.data_min_[3]
+    max_close = scaler.data_max_[3]
     actuals_original = actuals * (max_close - min_close) + min_close
     predictions_original = predictions * (max_close - min_close) + min_close
 
     y_test = actuals_original.flatten()
     y_pred = predictions_original.flatten()
 
-    # Calculate returns for IC
     returns_actual = np.diff(y_test) / y_test[:-1]
     returns_pred = np.diff(y_pred) / y_pred[:-1]
 
-    # Performance Metrics
-    mse = np.mean((y_test - y_pred)**2)
+    mse = np.mean((y_test - y_pred) ** 2)
     mae = np.mean(np.abs(y_test - y_pred))
-    ic, _ = spearmanr(returns_pred, returns_actual)  # IC는 수익률 비교
+    ic, _ = spearmanr(returns_pred, returns_actual)
 
-    # ICIR (Information Coefficient Information Ratio)
     ic_series = pd.Series(returns_actual).rolling(window=10).apply(
         lambda x: spearmanr(x, pd.Series(returns_pred).iloc[x.index])[0], raw=False
     )
@@ -185,21 +164,17 @@ def evaluate_model(model, test_loader, scaler):
 
     print(f'MSE: {mse:.6f}, MAE: {mae:.6f}, IC: {ic:.6f}, ICIR: {icir:.6f}')
 
-    # Plot results
     plt.figure(figsize=(12, 6))
     plt.plot(y_test, label='Actual (Original Scale)')
     plt.plot(y_pred, label='Predicted (Original Scale)')
     plt.legend()
-    plt.title(f'MSE: {mse:.6f}, MAE: {mae:.6f}, IC: {ic:.6f}, ICIR: {icir:.6f} Stock Prediction')
-    plt.savefig("ALSTM_prediction.png", dpi=300)
+    plt.title(f'MSE: {mse:.6f}, MAE: {mae:.6f}, IC: {ic:.6f}, ICIR: {icir:.6f} LSTM Stock Prediction')
+    plt.savefig("outputs/LSTM_prediction.png", dpi=300)
     plt.show()
     
-
 if __name__ == "__main__":
-    df, scaler = load_data(filepath="bitcoin_prices.csv", isScaled=True)
-    print(df.head())
+    df, scaler = load_data(filepath="inputs/bitcoin_prices.csv", isScaled=True)
     data_np = df.iloc[:, 1:].values
-    print(data_np.shape)
     split = int(len(data_np) * 0.8)
     train_data, test_data = data_np[:split], data_np[split+90:]
 
@@ -209,13 +184,11 @@ if __name__ == "__main__":
     
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    print(len(test_data))
-    ## OVERLAPPING 발생 문제제
 
     input_dim = data_np.shape[1]
-    model = ALSTM(input_dim=input_dim).to(device)
+    model = LSTMModel(input_dim=input_dim).to(device)
     
     train_model(model, train_loader)
     
-    model.load_state_dict(torch.load("alstm_model.pth"))
+    model.load_state_dict(torch.load("outputs/lstm_model.pth"))
     evaluate_model(model, test_loader, scaler)

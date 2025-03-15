@@ -111,8 +111,8 @@ class StockDataset(Dataset):
         return len(self.data) - self.seq_length
 
     def __getitem__(self, idx):
-        X = self.data[idx:idx + self.seq_length, :]  # 입력: 주가 + 지표 + 거래량
-        y = self.data[idx + self.seq_length, -1]  # 출력: 다음날 주가
+        X = self.data[idx:idx + self.seq_length, :]  # Input: Today-seq_length ~ today stock price + strategies + volume
+        y = self.data[idx + self.seq_length, -1]  # Output: Next day stock price
         return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
 # Train the model
@@ -135,8 +135,8 @@ def train_model(model, train_loader, epochs=100, lr=0.001):
             optimizer.step()
             total_loss += loss.item()
         
-        if epoch % 5 == 0:
-            print(f"Epoch {epoch}/{epochs}, Loss: {total_loss / len(train_loader):.6f}")
+        if (epoch+1) % 5 == 0:
+            print(f"Epoch {(epoch+1)}/{epochs}, Loss: {total_loss / len(train_loader):.6f}")
     
     torch.save(model.state_dict(), "outputs/alstm_model.pth")
     print("Model saved.")
@@ -175,7 +175,7 @@ def evaluate_model(model, test_loader, scaler):
     # Performance Metrics
     mse = np.mean((y_test - y_pred)**2)
     mae = np.mean(np.abs(y_test - y_pred))
-    ic, _ = spearmanr(returns_pred, returns_actual)  # IC는 수익률 비교
+    ic, _ = spearmanr(returns_pred, returns_actual)
 
     # ICIR (Information Coefficient Information Ratio)
     ic_series = pd.Series(returns_actual).rolling(window=10).apply(
@@ -190,7 +190,7 @@ def evaluate_model(model, test_loader, scaler):
     plt.plot(y_test, label='Actual (Original Scale)')
     plt.plot(y_pred, label='Predicted (Original Scale)')
     plt.legend()
-    plt.title(f'MSE: {mse:.6f}, MAE: {mae:.6f}, IC: {ic:.6f}, ICIR: {icir:.6f} Stock Prediction')
+    plt.title(f'MSE: {mse:.6f}, MAE: {mae:.6f}, IC: {ic:.6f}, ICIR: {icir:.6f} ALSTM Stock Prediction')
     plt.savefig("outputs/ALSTM_prediction.png", dpi=300)
     plt.show()
     
@@ -200,6 +200,7 @@ if __name__ == "__main__":
     print(df.head())
     data_np = df.iloc[:, 1:].values
     split = int(len(data_np) * 0.8)
+    # Adding 90, to prevent overlapping
     train_data, test_data = data_np[:split], data_np[split+90:]
 
     seq_length = 10
@@ -208,8 +209,7 @@ if __name__ == "__main__":
     
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    ## OVERLAPPING 발생 문제제
-
+    
     input_dim = data_np.shape[1]
     model = ALSTM(input_dim=input_dim).to(device)
     
