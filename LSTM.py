@@ -69,7 +69,7 @@ class LSTMModel(nn.Module):
 ### DATA PROCESSING
 
 # Load stock data
-def load_data(filepath, isScaled=True):
+def load_data(filepath):
     df = pd.read_csv(filepath)
         
     required_columns = {'Open', 'High', 'Low', 'Close', 'Volume'}
@@ -82,11 +82,11 @@ def load_data(filepath, isScaled=True):
     df['ATR'] = calculate_atr(df)
     df['%K'], df['%D'] = calculate_stochastic_oscillator(df)
     df.dropna(inplace=True)
-    if isScaled:
-        train_size = int(len(df) * 0.8)
-        scaler = MinMaxScaler()
-        df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # date 제외 regularization
-        df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # date 제외 regularization
+
+    scaler = MinMaxScaler()
+    train_size = int(len(df) * 0.8)
+    df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # date 제외 regularization
+    df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # date 제외 regularization
     return df, scaler
 
 class StockDataset(Dataset):
@@ -98,8 +98,8 @@ class StockDataset(Dataset):
         return len(self.data) - self.seq_length
 
     def __getitem__(self, idx):
-        X = self.data[idx:idx + self.seq_length, :]  # 입력: 주가 + 지표 + 거래량
-        y = self.data[idx + self.seq_length, -1]  # 출력: 다음날 주가
+        X = self.data[idx:idx + self.seq_length, :]
+        y = self.data[idx + self.seq_length, -1]
         return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
 # Train the model
@@ -297,7 +297,7 @@ def print_and_save_evaluation_results(results, metrics, filename="outputs/LSTM_t
     return df
     
 if __name__ == "__main__":
-    df, scaler = load_data(filepath="inputs/bitcoin_prices.csv", isScaled=True)
+    df, scaler = load_data(filepath="inputs/bitcoin_prices.csv")
     data_np = df.iloc[:, 1:].values
     split = int(len(data_np) * 0.8)
     train_data, test_data = data_np[:split], data_np[split+90:]
