@@ -95,11 +95,12 @@ def load_data(filepath, isScaled=True):
     df['ATR'] = calculate_atr(df)
     df['%K'], df['%D'] = calculate_stochastic_oscillator(df)
     df.dropna(inplace=True)
+
     if isScaled:
         train_size = int(len(df) * 0.8)
         scaler = MinMaxScaler()
-        df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # date 제외 regularization
-        df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # date 제외 regularization
+        df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # regularization except date
+        df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # regularization except date
     return df, scaler
 
 class StockDataset(Dataset):
@@ -141,7 +142,7 @@ def train_model(model, train_loader, epochs=100, lr=0.001):
     torch.save(model.state_dict(), "outputs/alstm_model.pth")
     print("Model saved.")
 
-def evaluate_trading_strategy(y_test, y_pred, threshold=0.05, risk_free_rate=0.02, N=365):
+def evaluate_trading_strategy(y_test, y_pred, threshold=0.03, risk_free_rate=0.02, N=365):
     """
     Evaluate Trend Following & Event-Driven Trading strategies + Key Metrics Calculation
     
@@ -156,14 +157,19 @@ def evaluate_trading_strategy(y_test, y_pred, threshold=0.05, risk_free_rate=0.0
     # Calculate daily returns
     returns = np.diff(y_test) / y_test[:-1]  # Actual returns
     pred_returns = np.diff(y_pred) / y_pred[:-1]  # Predicted returns
+
+    df = pd.DataFrame(returns)
+    summary = df.describe()
+    print(summary)
     
-    # Trend-following strategy: If y_pred > y_test, go long (buy), otherwise go short (sell)
-    trend_strategy = np.where(y_pred[1:] > y_test[:-1], 1, -1)  # Buy (1) or Sell (-1)
+    # Trend-following strategy: If y_pred > y_pred, go long (buy)
+    trend_strategy = np.where(pred_returns > 0, 1, 0)  # Buy (1), no Short.
+    print(f"trend strategy is traded {np.sum(trend_strategy)} times in {len(y_pred)} days.")
     trend_returns = trend_strategy * returns  # Returns based on the trading strategy
     
-    # Event-driven strategy: If price change exceeds threshold (5%), take a strong buy/sell position
-    event_strategy = np.zeros_like(returns)
-    event_strategy[np.abs(pred_returns) > threshold] = np.sign(pred_returns[np.abs(pred_returns) > threshold])
+    # Event-driven strategy: If y_pred exceeds the threshold, take the buy position.
+    event_strategy = np.where(pred_returns > threshold, 1, 0)
+    print(f"event strategy is traded {np.sum(event_strategy)} times in {len(y_pred)} days.")
     event_returns = event_strategy * returns  # Returns based on the event-driven strategy
 
     # Calculate cumulative returns (Keep as arrays)
@@ -324,7 +330,7 @@ if __name__ == "__main__":
     train_dataset = StockDataset(train_data, seq_length)
     test_dataset = StockDataset(test_data, seq_length)
     
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     
     input_dim = data_np.shape[1]

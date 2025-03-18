@@ -85,8 +85,8 @@ def load_data(filepath):
 
     scaler = MinMaxScaler()
     train_size = int(len(df) * 0.8)
-    df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # date 제외 regularization
-    df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # date 제외 regularization
+    df.iloc[:train_size, 1:] = scaler.fit_transform(df.iloc[:train_size, 1:])  # regularization except date
+    df.iloc[train_size+90:, 1:] = scaler.transform(df.iloc[train_size+90:, 1:])  # regularization except date
     return df, scaler
 
 class StockDataset(Dataset):
@@ -179,7 +179,7 @@ def evaluate_model(model, test_loader, scaler):
     metrices = [mse, mae, ic, icir]
     return y_pred, y_test, metrices
 
-def evaluate_trading_strategy(y_test, y_pred, threshold=0.05, risk_free_rate=0.02, N=365):
+def evaluate_trading_strategy(y_test, y_pred, threshold=0.03, risk_free_rate=0.02, N=365):
     """
     Evaluate Trend Following & Event-Driven Trading strategies + Key Metrics Calculation
     
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     train_dataset = StockDataset(train_data, seq_length)
     test_dataset = StockDataset(test_data, seq_length)
     
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
     input_dim = data_np.shape[1]
